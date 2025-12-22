@@ -45,16 +45,24 @@ class PlotFactory:
                 ax.grid(True, alpha=0.3)
 
             elif ct == "bar":
-                if y_col is None:
-                    raise ValueError("bar plot requires y_col")
-                grouped = df.groupby(x_col)[y_col].mean()
+                series = df[y_col]
+
+                if pd.api.types.is_numeric_dtype(series):
+                    # numeric Y: show mean per X
+                    grouped = df.groupby(x_col)[y_col].mean()
+                    ylabel = f"Mean {y_col}"
+                else:
+                    # non-numeric Y: show counts per X
+                    grouped = df.groupby(x_col)[y_col].value_counts().unstack(fill_value=0).sum(axis=1)
+                    ylabel = "Count"
+            
                 ax.bar(range(len(grouped)), grouped.values,
-                       color="steelblue", edgecolor="black")
+                       color='steelblue', edgecolor='black')
                 ax.set_xticks(range(len(grouped)))
-                ax.set_xticklabels(grouped.index, rotation=45, ha="right")
-                ax.set_xlabel(x_col, fontsize=12, fontweight="bold")
-                ax.set_ylabel(y_col, fontsize=12, fontweight="bold")
-                ax.set_title(f"{y_col} by {x_col}", fontsize=14, fontweight="bold")
+                ax.set_xticklabels(grouped.index, rotation=45, ha='right')
+                ax.set_xlabel(x_col, fontsize=12, fontweight='bold')
+                ax.set_ylabel(ylabel, fontsize=12, fontweight='bold')
+                ax.set_title(f"{ylabel} by {x_col}", fontsize=14, fontweight='bold')
 
             elif ct == "histogram":
                 ax.hist(df[x_col].dropna(), bins=30, color="steelblue",
@@ -168,4 +176,5 @@ class PlotFactory:
         except Exception as e:
             logger.error(f"Error creating regression plot: {str(e)}")
             raise
+
     
