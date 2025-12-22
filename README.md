@@ -50,8 +50,8 @@ Load your datasets (CSV, Excel, or directly from SQL databases), handle missing 
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/your-username/universal-data-analyzer.git
-   cd universal-data-analyzer
+   git clone https://github.com/wilson-adhikari/Universal-Data-Analyzer-Desktop-Version.git
+   cd Universal Data Analyzer exe
    ```
 2. **Create and activate a virtual environment** (recommended)
    ```bash
