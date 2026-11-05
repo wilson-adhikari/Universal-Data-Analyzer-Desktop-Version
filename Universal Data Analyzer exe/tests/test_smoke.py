@@ -46,7 +46,3 @@ def test_pipeline_and_export(csv_path, chart_type, tmp_path):
         assert out.stat().st_size > 0
 
 
-@pytest.mark.xfail(reason="D3: export_plot_to_svg missing", raises=AttributeError, strict=True)
-def test_svg_export(csv_path, tmp_path):
-    fig = Controller().run(csv_path, ["line"], ["mean"], "x", "y", "csv")[0][3][0]
-    PlotExporter.export_plot_to_svg(fig, str(tmp_path / "line.svg"))

@@ -1,6 +1,8 @@
 import sys
 from pathlib import Path
 
+import pandas as pd
+
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QApplication,
@@ -161,6 +163,23 @@ class MainWindow(QMainWindow):
             self.path = file_path
             self.load_button.setText(f"Loaded: {Path(file_path).name}")
             self.run_button.setEnabled(True)
+            try:  # header only, so large files stay fast
+                reader = pd.read_csv if file_type == "csv" else pd.read_excel
+                self._set_columns([str(c) for c in reader(file_path, nrows=0).columns])
+            except Exception as e:
+                QMessageBox.warning(self, "Could not read columns", f"The file could not be read:\n{e}")
+
+    def _set_columns(self, columns):
+        """Refill the X/Y pickers, keeping the current choices when they still exist."""
+        x, y = self.x_col_selector.currentText(), self.y_col_selector.currentText()
+        self.x_col_selector.clear()
+        self.y_col_selector.clear()
+        self.x_col_selector.addItems(columns)
+        self.y_col_selector.addItems(["None", *columns])
+        if x in columns:
+            self.x_col_selector.setCurrentText(x)
+        if y in columns:
+            self.y_col_selector.setCurrentText(y)
 
     def run_analysis(self):
         # === Validation ===
@@ -240,16 +259,9 @@ class MainWindow(QMainWindow):
         summary_text = summary if isinstance(summary, str) else str(summary)
         self.summary_tab.setText(summary_text)
 
-        # Populate column selectors
-        columns = list(df_clean.columns)
-        self.x_col_selector.clear()
-        self.y_col_selector.clear()
-        self.x_col_selector.addItems(columns)
-        self.y_col_selector.addItem("None")
-        self.y_col_selector.addItems(columns)
-
-        if columns:
-            self.x_col_selector.setCurrentIndex(0)
+        self._set_columns(list(df_clean.columns))
+        if self.controller.last_issues:
+            QMessageBox.warning(self, "Data quality warnings", "\n".join(self.controller.last_issues))
 
         # DataFrame view tab (create once)
         df_view = self.tabs.findChild(QTextEdit, "DataFrameView")

@@ -64,6 +64,7 @@ class Controller:
     """
 
     def __init__(self, config_path: str | None = None):
+        self.last_issues: list[str] = []  # data-quality warnings from the latest run, shown by the UI
         self.config = load_config(config_path) if config_path else {}
         self.csv_loader = CSVLoader()
         self.excel_loader = ExcelLoader()
@@ -108,7 +109,7 @@ class Controller:
             if df.empty:
                 raise DataValidationException("Loaded dataset is empty.")
 
-            self.validator.validate_dataframe(df)
+            self.last_issues = self.validator.validate_dataframe(df)[1]
 
             if not strategies:
                 raise DataValidationException("Please select at least one strategy.")

@@ -50,7 +50,10 @@ class MissingValueHandler:
             df[subset] = df[subset].bfill()
         
         elif strategy == 'constant':
-            df[subset] = df[subset].fillna(0)
+            numeric_cols = df[subset].select_dtypes(include=['number']).columns
+            other_cols = [c for c in subset if c not in numeric_cols]
+            df[numeric_cols] = df[numeric_cols].fillna(0)
+            df[other_cols] = df[other_cols].fillna("Unknown")
         
         logger.info(f"Missing values after handling: {df.isnull().sum().sum()}")
         return df

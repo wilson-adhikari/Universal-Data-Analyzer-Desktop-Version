@@ -68,3 +68,14 @@ class PlotExporter:
         except Exception as e:
             logger.error(f"Failed to export plot to PDF: {e}")
             raise
+
+    @staticmethod
+    def export_plot_to_svg(fig: Figure, file_path: str) -> None:
+        """Export plot to SVG file (vector, editable in Inkscape/Illustrator)."""
+        try:
+            path = PlotExporter._ensure_dir(file_path)
+            fig.savefig(path, format="svg", bbox_inches="tight")
+            logger.info(f"Plot exported successfully to {path}")
+        except Exception as e:
+            logger.error(f"Failed to export plot to SVG: {e}")
+            raise
