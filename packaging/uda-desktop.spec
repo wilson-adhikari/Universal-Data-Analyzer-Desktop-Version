@@ -5,10 +5,13 @@
 import os
 
 APP_DIR = os.path.join(SPECPATH, "..", "Universal Data Analyzer exe")
+# Public key for offline licence checks; generate the pair with the website's scripts/gen-licence-keys.mjs.
+PUBKEY = os.path.join(APP_DIR, "licence_public_key.pem")
 
 a = Analysis(
     [os.path.join(APP_DIR, "main.py")],
     pathex=[APP_DIR],
+    datas=[(PUBKEY, ".")] if os.path.exists(PUBKEY) else [],
     hiddenimports=[
         "matplotlib.backends.backend_qtagg",  # imported statically today; pinned in case that changes
         "sqlalchemy.dialects.sqlite",  # dialects are loaded by name from the user's connection string

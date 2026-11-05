@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QLineEdit,
     QMessageBox,
+    QInputDialog,
 )
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 
@@ -24,12 +25,16 @@ from ui.worker import Worker
 from ui.multi_select_combo import MultiSelectComboBox
 from reporting.export_plots import PlotExporter
 from cleaning.missing_values import MissingValueHandler
+import licensing
 
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Universal Data Analyzer - Desktop")
+        self._licence = licensing.current()
+        self._update_title()
+        help_menu = self.menuBar().addMenu("&Help")
+        help_menu.addAction("Activate licence…", self.activate_licence)
         self.resize(1400, 900)
 
         self.controller = Controller()
@@ -305,6 +310,25 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "Success", f"Plot exported to:\n{file_path}")
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", f"Error saving plot:\n{str(e)}")
+
+
+    def _update_title(self):
+        suffix = f" — Licensed to {self._licence.get('email') or 'you'}" if self._licence else ""
+        self.setWindowTitle("Universal Data Analyzer - Desktop" + suffix)
+
+    def activate_licence(self):
+        key, ok = QInputDialog.getMultiLineText(
+            self, "Activate licence", "Paste the licence key from your purchase confirmation page:"
+        )
+        if not ok or not key.strip():
+            return
+        try:
+            self._licence = licensing.activate(key)
+        except licensing.LicenceError as e:
+            QMessageBox.warning(self, "Licence not activated", str(e))
+            return
+        self._update_title()
+        QMessageBox.information(self, "Licence activated", f"Licensed to {self._licence.get('email') or 'you'}.")
 
 
 def main():
