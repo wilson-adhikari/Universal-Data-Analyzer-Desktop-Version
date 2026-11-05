@@ -1,0 +1,10 @@
+# Exact runtime pins for UDA Desktop (Python 3.11), verified by the packaging spike 2026-11-06.
+# Build/test tools: pip install pyinstaller==6.22.3 pytest==9.2.0
+pandas==3.1.1
+numpy==2.4.6
+matplotlib==3.11.2
+seaborn==0.13.2
+scipy==1.17.1
+SQLAlchemy==2.1.8
+openpyxl==3.1.5
+PySide6==6.12.0
