@@ -90,7 +90,7 @@ Load your datasets (CSV, Excel, or directly from SQL databases), handle missing 
 3. **Select cleaning strategy**
 
 - Use the **Missing-value strategies** multi-select dropdown.
-- You can check multiple strategies, but the app currently uses the **first selected strategy** for the actual cleaning pass.[web:320][web:326]
+- You can check several strategies. They run in the order listed (forward_fill → backward_fill → mean → median → constant → drop), and each one fills what the previous left. Drop always runs last.
 
 4. **Configure charts**
 

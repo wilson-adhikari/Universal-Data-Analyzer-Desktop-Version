@@ -23,6 +23,7 @@ from core.controller import Controller
 from ui.worker import Worker
 from ui.multi_select_combo import MultiSelectComboBox
 from reporting.export_plots import PlotExporter
+from cleaning.missing_values import MissingValueHandler
 
 
 class MainWindow(QMainWindow):
@@ -55,16 +56,12 @@ class MainWindow(QMainWindow):
         self.file_type_selector = QComboBox()
         self.file_type_selector.addItems(["csv", "excel", "sql"])
 
-        # Missing value strategies (multi-select)
+        # Missing value strategies (multi-select), listed in the order they are applied
         self.strategy_selector = MultiSelectComboBox(max_visible_names=4)
-        self.strategy_selector.add_checkable_items([
-            "drop",
-            "mean",
-            "median",
-            "forward_fill",
-            "backward_fill",
-            "constant",
-        ])
+        self.strategy_selector.add_checkable_items(MissingValueHandler.STRATEGY_ORDER)
+        self.strategy_selector.setToolTip(
+            "Selected strategies run top to bottom; each fills what the previous one left."
+        )
 
         # Chart types (multi-select)
         self.chart_selector = MultiSelectComboBox(max_visible_names=4)

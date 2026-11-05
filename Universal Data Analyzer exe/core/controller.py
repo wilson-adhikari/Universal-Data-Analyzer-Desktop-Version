@@ -112,13 +112,11 @@ class Controller:
 
             if not strategies:
                 raise DataValidationException("Please select at least one strategy.")
-            strategy = strategies[0]
-
             if not x:
                 x = df.columns[0]
 
-            logger.info(f"Cleaning data with strategy '{strategy}'")
-            df_clean = self.missing_value_handler.handle(df.copy(), strategy=strategy)
+            logger.info(f"Cleaning data with strategies {strategies}")
+            df_clean = self.missing_value_handler.handle_many(df.copy(), strategies)
 
             summary = self.summary_stats.get_summary(df_clean)
 

@@ -8,7 +8,20 @@ logger = logging.getLogger(__name__)
 
 class MissingValueHandler:
     """Handle missing values in dataframes"""
-    
+
+    # Order strategies are applied in when several are selected: position-based fills first,
+    # statistical fills next, drop last (drop first would leave nothing for the others to fill).
+    STRATEGY_ORDER = ['forward_fill', 'backward_fill', 'mean', 'median', 'constant', 'drop']
+
+    def handle_many(self, df: pd.DataFrame, strategies: List[str]) -> pd.DataFrame:
+        """Apply each selected strategy in STRATEGY_ORDER; each one fills what the previous left."""
+        unknown = set(strategies) - set(self.STRATEGY_ORDER)
+        if unknown:
+            raise ValueError(f"Unknown missing-value strategies: {sorted(unknown)}")
+        for strategy in sorted(set(strategies), key=self.STRATEGY_ORDER.index):
+            df = self.handle(df, strategy=strategy)
+        return df
+
     def handle(self, df: pd.DataFrame, strategy: str = 'drop', subset: Optional[List[str]] = None) -> pd.DataFrame:
         """Handle missing values using specified strategy"""
         df = df.copy()
@@ -31,10 +44,10 @@ class MissingValueHandler:
             df[numeric_cols] = df[numeric_cols].fillna(df[numeric_cols].median())
         
         elif strategy == 'forward_fill':
-            df[subset] = df[subset].fillna(method='ffill')
-        
+            df[subset] = df[subset].ffill()
+
         elif strategy == 'backward_fill':
-            df[subset] = df[subset].fillna(method='bfill')
+            df[subset] = df[subset].bfill()
         
         elif strategy == 'constant':
             df[subset] = df[subset].fillna(0)
