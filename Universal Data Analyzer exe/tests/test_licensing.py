@@ -1,88 +1,94 @@
-import base64
+import io
 import json
+import urllib.error
 
 import pytest
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import licensing
 from licensing import LicenceError, verify
 
-
-def _b64(b: bytes) -> str:
-    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
-
-
-def _keypair():
-    priv = Ed25519PrivateKey.generate()
-    pub = priv.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
-    return priv, pub
+KEY = "6F0E4C97-B72A4E69-A11BF6C4-AF6517E7"
+ACTIVE = (200, {"valid": True, "product": "uda-desktop", "exp": None})
+INACTIVE = (200, {"valid": False, "product": None, "exp": None})
 
 
-def _sign(priv, **overrides) -> str:
-    payload = {"v": 1, "product": "uda-desktop", "email": "a@b.test", "sid": "cs_test_1", "iat": 1, "exp": None, **overrides}
-    body = json.dumps(payload).encode()
-    return f"{_b64(body)}.{_b64(priv.sign(body))}"
+class _Reply(io.BytesIO):
+    status = 200
 
 
-def test_valid_licence_verifies():
-    priv, pub = _keypair()
-    assert verify(_sign(priv), pub)["email"] == "a@b.test"
+def serve(monkeypatch, answer):
+    """Replace the network: answer(key) returns (HTTP status, JSON reply) like /api/licence/validate, or raises."""
+    sent = []
+
+    def urlopen(req, timeout):
+        key = json.loads(req.data)["key"]
+        sent.append((req.full_url, key, timeout))
+        status, reply = answer(key)
+        body = json.dumps(reply).encode()
+        if status != 200:
+            raise urllib.error.HTTPError(req.full_url, status, "error", None, io.BytesIO(body))
+        return _Reply(body)
+
+    monkeypatch.setattr(licensing.urllib.request, "urlopen", urlopen)
+    return sent
 
 
-def test_tampered_payload_rejected():
-    priv, pub = _keypair()
-    _, sig = _sign(priv).split(".")
-    forged = _b64(json.dumps({"v": 1, "product": "uda-desktop", "email": "x", "sid": "s", "iat": 1, "exp": None}).encode())
-    with pytest.raises(LicenceError, match="invalid"):
-        verify(f"{forged}.{sig}", pub)
+def test_active_licence_for_uda(monkeypatch):
+    sent = serve(monkeypatch, lambda key: ACTIVE)
+    assert verify(f"  {KEY}\n") == {"product": "uda-desktop", "exp": None}
+    assert sent == [(licensing.LICENCE_URL, KEY, 15)]
 
 
-def test_other_key_rejected():
-    priv, _ = _keypair()
-    _, other_pub = _keypair()
-    with pytest.raises(LicenceError, match="invalid"):
-        verify(_sign(priv), other_pub)
+@pytest.mark.parametrize(
+    "answer, message",
+    [
+        ((200, {"valid": True, "product": "cpu-lab", "exp": None}), "different product"),
+        (INACTIVE, "not active"),
+        ((404, {"error": "Billing is not enabled"}), "not on sale"),
+        ((503, {"error": "licence check unavailable"}), "unavailable"),
+    ],
+)
+def test_server_answers_that_refuse(monkeypatch, answer, message):
+    serve(monkeypatch, lambda key: answer)
+    with pytest.raises(LicenceError, match=message):
+        verify(KEY)
 
 
-def test_wrong_product_rejected():
-    priv, pub = _keypair()
-    with pytest.raises(LicenceError, match="different product"):
-        verify(_sign(priv, product="other"), pub)
+def test_offline_is_a_clear_error(monkeypatch):
+    def offline(key):
+        raise urllib.error.URLError("no route")
+
+    serve(monkeypatch, offline)
+    with pytest.raises(LicenceError, match="could not reach"):
+        verify(KEY)
 
 
-def test_expiry():
-    priv, pub = _keypair()
-    key = _sign(priv, exp=1000)
-    with pytest.raises(LicenceError, match="expired"):
-        verify(key, pub, now=2000)
-    assert verify(key, pub, now=500)["exp"] == 1000
+@pytest.mark.parametrize("bad", ["", "abc", "a.b.c", "!!!.???", "x" * 100, "../../admin"])
+def test_malformed_keys_are_never_sent(monkeypatch, bad):
+    sent = serve(monkeypatch, lambda key: ACTIVE)
+    with pytest.raises(LicenceError, match="not a licence key"):
+        verify(bad)
+    assert sent == []
 
 
-@pytest.mark.parametrize("bad", ["", "abc", "a.b.c", "!!!.???"])
-def test_malformed_rejected(bad):
-    _, pub = _keypair()
-    with pytest.raises(LicenceError):
-        verify(bad, pub)
+def test_server_url_must_be_https(monkeypatch):
+    sent = serve(monkeypatch, lambda key: ACTIVE)
+    monkeypatch.setattr(licensing, "LICENCE_URL", "http://example.test/api/licence/validate")
+    with pytest.raises(LicenceError, match="https"):
+        verify(KEY)
+    assert sent == []
 
 
-def test_activate_saves_and_current_reloads(tmp_path, monkeypatch):
-    priv, pub = _keypair()
-    key_file = tmp_path / "pub.pem"
-    key_file.write_bytes(pub)
-    monkeypatch.setattr(licensing, "PUBLIC_KEY_FILE", key_file)
+def test_activate_saves_and_current_rechecks(tmp_path, monkeypatch):
     monkeypatch.setattr(licensing, "LICENCE_FILE", tmp_path / "UDA" / "licence.key")
+    answer = {"now": ACTIVE}
+    sent = serve(monkeypatch, lambda key: answer["now"])
+    assert licensing.current() is None and sent == [], "no saved key: no network call"
+    licensing.activate(KEY)
+    assert licensing.current() == {"product": "uda-desktop", "exp": None}
+    assert sent[-1][2] == 5, "start-up check uses a short timeout"
+    answer["now"] = INACTIVE  # e.g. the subscription was refunded
     assert licensing.current() is None
-    licensing.activate(_sign(priv))
-    assert licensing.current()["email"] == "a@b.test"
-    (tmp_path / "UDA" / "licence.key").write_text("tampered.key")
-    assert licensing.current() is None
-
-
-def test_missing_public_key_is_a_clear_error(tmp_path, monkeypatch):
-    monkeypatch.setattr(licensing, "PUBLIC_KEY_FILE", tmp_path / "missing.pem")
-    with pytest.raises(LicenceError, match="not set up"):
-        verify("a.b")
 
 
 def test_main_window_activation_flow(tmp_path, monkeypatch):
@@ -92,20 +98,18 @@ def test_main_window_activation_flow(tmp_path, monkeypatch):
     app = QApplication.instance() or QApplication([])  # noqa: F841
     from ui.main_window import MainWindow
 
-    priv, pub = _keypair()
-    (tmp_path / "pub.pem").write_bytes(pub)
-    monkeypatch.setattr(licensing, "PUBLIC_KEY_FILE", tmp_path / "pub.pem")
     monkeypatch.setattr(licensing, "LICENCE_FILE", tmp_path / "licence.key")
+    serve(monkeypatch, lambda key: ACTIVE if key == KEY else INACTIVE)
     shown = []
     monkeypatch.setattr(QMessageBox, "information", lambda *a: shown.append(a[1]))
     monkeypatch.setattr(QMessageBox, "warning", lambda *a: shown.append(a[1]))
 
     w = MainWindow()
     assert "Licensed" not in w.windowTitle()
-    monkeypatch.setattr(QInputDialog, "getMultiLineText", lambda *a, **k: ("garbage", True))
+    monkeypatch.setattr(QInputDialog, "getMultiLineText", lambda *a, **k: ("AAAAAAAA-BBBBBBBB-CCCCCCCC-DDDDDDDD", True))
     w.activate_licence()
     assert shown[-1] == "Licence not activated" and "Licensed" not in w.windowTitle()
-    monkeypatch.setattr(QInputDialog, "getMultiLineText", lambda *a, **k: (_sign(priv), True))
+    monkeypatch.setattr(QInputDialog, "getMultiLineText", lambda *a, **k: (KEY, True))
     w.activate_licence()
-    assert shown[-1] == "Licence activated" and "Licensed to a@b.test" in w.windowTitle()
-    assert MainWindow().windowTitle().endswith("Licensed to a@b.test")  # remembered on next start
+    assert shown[-1] == "Licence activated" and "Licensed to you" in w.windowTitle()
+    assert MainWindow().windowTitle().endswith("Licensed to you")  # remembered and re-checked on next start

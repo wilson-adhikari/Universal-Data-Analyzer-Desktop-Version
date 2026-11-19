@@ -330,7 +330,7 @@ class MainWindow(QMainWindow):
 
     def activate_licence(self):
         key, ok = QInputDialog.getMultiLineText(
-            self, "Activate licence", "Paste the licence key from your purchase confirmation page:"
+            self, "Activate licence", "Paste the licence key from your Gumroad receipt:"
         )
         if not ok or not key.strip():
             return

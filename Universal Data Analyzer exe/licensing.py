@@ -1,52 +1,60 @@
-"""Offline licence check. Keys are issued by the company website after a confirmed Stripe payment.
+"""Licence check for UDA Desktop, made online by the AXIOMERA licence server.
 
-Key format: base64url(JSON payload) "." base64url(Ed25519 signature of the payload bytes).
-Only the PUBLIC key ships with the app, so keys can be verified but never forged from it.
+The key is the Gumroad licence key from the purchase receipt. The server asks Gumroad on every check, so a
+cancelled, refunded or failed subscription stops working (the same check the CPU and GPU labs use).
 """
-import base64
 import json
 import os
-import sys
-import time
+import re
+import urllib.error
+import urllib.request
 from pathlib import Path
 
-from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.serialization import load_pem_public_key
-
 PRODUCT = "uda-desktop"
-_BASE = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
-PUBLIC_KEY_FILE = _BASE / "licence_public_key.pem"
+LICENCE_URL = os.environ.get("UDA_LICENCE_URL") or "https://axiomera-iota.vercel.app/api/licence/validate"
 LICENCE_FILE = Path(os.environ.get("APPDATA") or Path.home()) / "UDA Desktop" / "licence.key"
+_KEY = re.compile(r"[A-Za-z0-9-]{8,64}")  # Gumroad keys look like 6F0E4C97-B72A4E69-A11BF6C4-AF6517E7
 
 
 class LicenceError(Exception):
     pass
 
 
-def _b64(s: str) -> bytes:
-    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
-
-
-def verify(key: str, public_key_pem: bytes | None = None, now: float | None = None) -> dict:
-    parts = key.strip().split(".")
-    if len(parts) != 2 or not all(parts):
-        raise LicenceError("malformed licence")
-    if public_key_pem is None:
-        if not PUBLIC_KEY_FILE.exists():
-            raise LicenceError("licence checking is not set up in this build")
-        public_key_pem = PUBLIC_KEY_FILE.read_bytes()
+def _ask_server(key: str, timeout: float) -> tuple[int, dict]:
+    """POST {"key": key} to the licence server; returns (HTTP status, JSON reply)."""
+    if not LICENCE_URL.startswith(("https://", "http://localhost")):
+        raise LicenceError("UDA_LICENCE_URL must be an https:// URL")
+    req = urllib.request.Request(
+        LICENCE_URL, data=json.dumps({"key": key}).encode(), headers={"Content-Type": "application/json"}, method="POST"
+    )
     try:
-        body, sig = _b64(parts[0]), _b64(parts[1])
-        load_pem_public_key(public_key_pem).verify(sig, body)
-        lic = json.loads(body)
-    except (InvalidSignature, ValueError):
-        raise LicenceError("invalid licence key") from None
-    if lic.get("product") != PRODUCT:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            status, body = r.status, r.read()
+    except urllib.error.HTTPError as e:
+        status, body = e.code, e.read()
+    except (urllib.error.URLError, OSError):
+        raise LicenceError("could not reach the licence server; check your internet connection") from None
+    try:
+        return status, json.loads(body or b"{}")
+    except ValueError:
+        return status, {}
+
+
+def verify(key: str, timeout: float = 15) -> dict:
+    """The licence if the server confirms the key is active for UDA Desktop; raises LicenceError otherwise."""
+    key = key.strip()
+    if not _KEY.fullmatch(key):
+        raise LicenceError("that is not a licence key: paste the key from your Gumroad receipt")
+    status, reply = _ask_server(key, timeout)
+    if reply.get("error") == "Billing is not enabled":
+        raise LicenceError("subscriptions are not on sale yet, so UDA Desktop needs no licence for now")
+    if status != 200:
+        raise LicenceError("the licence check is unavailable right now; try again later")
+    if reply.get("valid") is not True:
+        raise LicenceError("licence not active: check the key and that the subscription is still active")
+    if reply.get("product") != PRODUCT:
         raise LicenceError("licence is for a different product")
-    exp = lic.get("exp")
-    if exp is not None and exp < (time.time() if now is None else now):
-        raise LicenceError("licence expired")
-    return lic
+    return {"product": PRODUCT, "exp": reply.get("exp")}
 
 
 def activate(key: str) -> dict:
@@ -58,8 +66,10 @@ def activate(key: str) -> dict:
 
 
 def current() -> dict | None:
-    """The saved licence if it is still valid; None otherwise (missing, tampered or expired)."""
+    """The saved licence if the server still confirms it; None otherwise (missing, inactive, or offline)."""
+    # shortcut: checked on the UI thread at start-up (at most 5 s when the network hangs); move it to a worker
+    # once paid features depend on it.
     try:
-        return verify(LICENCE_FILE.read_text(encoding="utf-8"))
+        return verify(LICENCE_FILE.read_text(encoding="utf-8"), timeout=5)
     except (OSError, LicenceError):
         return None
