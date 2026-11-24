@@ -39,6 +39,10 @@ jobs:
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="dev-${GITHUB_SHA::7}"; fi
           pyinstaller --noconfirm --workpath build/work --distpath build/dist packaging/uda-desktop.spec
+          # Licence notices go next to the exe: our MIT licence, the LGPL/GPL texts for Qt/PySide6, the notice file.
+          cp LICENSE packaging/THIRD_PARTY_NOTICES.txt build/dist/UDA-Desktop/ && cp -r packaging/licenses build/dist/UDA-Desktop/
+          ls build/dist/UDA-Desktop/licenses/LGPL-3.0.txt build/dist/UDA-Desktop/licenses/GPL-3.0.txt > /dev/null
+          ls -d build/dist/UDA-Desktop/_internal/pandas-*.dist-info > /dev/null
           cd build/dist && 7z a "../../UDA-Desktop-$v-windows-x64.zip" UDA-Desktop > /dev/null
 
       # The packaged app (not the source tree) must start and keep running: catches missing modules and Qt plugins.
