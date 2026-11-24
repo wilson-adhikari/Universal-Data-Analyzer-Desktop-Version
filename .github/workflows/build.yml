@@ -1,0 +1,71 @@
+# Tests UDA Desktop and packages the Windows download on every push and pull request.
+# Pushing a tag such as v0.1.0 also publishes that download as a GitHub Release (confirm the LICENSE copyright
+# holder and ship the Qt/PySide6 LGPL notices first: docs/PACKAGING.md).
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install (pinned runtime + build/test tools from requirements-runtime.txt)
+        run: pip install -r requirements-runtime.txt pyinstaller==6.22.3 pytest==9.2.0
+
+      - name: Test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        working-directory: Universal Data Analyzer exe
+        run: python -m pytest -q tests
+
+      - name: Package
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then v="${GITHUB_REF_NAME#v}"; else v="dev-${GITHUB_SHA::7}"; fi
+          pyinstaller --noconfirm --workpath build/work --distpath build/dist packaging/uda-desktop.spec
+          cd build/dist && 7z a "../../UDA-Desktop-$v-windows-x64.zip" UDA-Desktop > /dev/null
+
+      # The packaged app (not the source tree) must start and keep running: catches missing modules and Qt plugins.
+      - name: Smoke-test the package
+        run: |
+          build/dist/UDA-Desktop/UDA-Desktop.exe &
+          sleep 20
+          tasklist | grep -i UDA-Desktop.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: uda-desktop-windows
+          path: UDA-Desktop-*.zip
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "UDA Desktop $GITHUB_REF_NAME" --generate-notes
